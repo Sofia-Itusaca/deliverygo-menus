@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: deliverygo-menus, namespace: deliverygo}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: deliverygo-menus}}
+  template:
+    metadata: {labels: {app: deliverygo-menus}}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: menu-service
+          image: ACCOUNT.dkr.ecr.us-east-2.amazonaws.com/deliverygo-menus:IMAGE_TAG
+          ports: [{name: http, containerPort: 8082}]
+          envFrom: [{configMapRef: {name: deliverygo-menus}}]
+          env: [{name: MONGODB_URL, valueFrom: {secretKeyRef: {name: deliverygo-db, key: mongodb-url}}}]
+          resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 500m, memory: 512Mi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          readinessProbe: {httpGet: {path: /health/ready, port: http}, initialDelaySeconds: 5, periodSeconds: 10}
+          livenessProbe: {httpGet: {path: /health/live, port: http}, initialDelaySeconds: 10, periodSeconds: 20}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: deliverygo-menus, namespace: deliverygo}
+spec: {selector: {app: deliverygo-menus}, ports: [{port: 8082, targetPort: http}], type: ClusterIP}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: deliverygo-menus, namespace: deliverygo}
+data: {MONGODB_DATABASE: deliverygo, FRONTEND_ORIGINS: "https://deliverygo.example"}
