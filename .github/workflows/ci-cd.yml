@@ -33,18 +33,28 @@ jobs:
         run: python -m compileall -q app
       - id: lint
         run: pip install ruff && ruff check app --select E9,F63,F7,F82
+      - name: Lint Dockerfile (Hadolint)
+        id: hadolint
+        run: docker run --rm -v "$PWD:/src:ro" hadolint/hadolint:v2.15.1-alpine /bin/hadolint /src/Dockerfile
+      - name: Validate Kubernetes manifests (Kubeconform)
+        id: kubeconform
+        run: docker run --rm -v "$PWD:/src:ro" ghcr.io/yannh/kubeconform:v0.8.0-alpine -strict -summary /src/k8s/deployment.yaml /src/k8s/namespace.yaml
       - uses: docker/build-push-action@v6
         id: docker
         with: {context: ., push: false, load: true, tags: deliverygo-menus:ci}
       - uses: aquasecurity/trivy-action@v0.36.0
         id: trivy
-        with: {image-ref: deliverygo-menus:ci, format: table, exit-code: '1', severity: 'CRITICAL,HIGH', ignore-unfixed: true}
+        with: {image-ref: deliverygo-menus:ci, format: table, exit-code: '1', severity: 'CRITICAL,HIGH'}
+      - name: Audit Python dependencies
+        id: pip_audit
+        if: always() && steps.dependencies.outcome == 'success'
+        run: pip install pip-audit && pip-audit -r requirements.txt
       - name: Record CI evidence
         if: always()
         run: |
           echo "## DeliveryGo Menus CI" >> "$GITHUB_STEP_SUMMARY"
           echo "Run: $GITHUB_RUN_ID; commit: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
-          echo "SPEC: ${{ steps.specs.outcome }}; verifier tests: ${{ steps.spec_tests.outcome }}; dependencies: ${{ steps.dependencies.outcome }}; tests: ${{ steps.tests.outcome }}; compile: ${{ steps.build.outcome }}; lint: ${{ steps.lint.outcome }}; Docker: ${{ steps.docker.outcome }}; Trivy: ${{ steps.trivy.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "SPEC: ${{ steps.specs.outcome }}; verifier tests: ${{ steps.spec_tests.outcome }}; dependencies: ${{ steps.dependencies.outcome }}; pip-audit: ${{ steps.pip_audit.outcome }}; tests: ${{ steps.tests.outcome }}; compile: ${{ steps.build.outcome }}; lint: ${{ steps.lint.outcome }}; Hadolint: ${{ steps.hadolint.outcome }}; Kubeconform: ${{ steps.kubeconform.outcome }}; Docker: ${{ steps.docker.outcome }}; Trivy: ${{ steps.trivy.outcome }}" >> "$GITHUB_STEP_SUMMARY"
   deploy:
     if: github.event_name == 'workflow_dispatch' && inputs.deploy_production == true && github.ref == 'refs/heads/main' && vars.AWS_DEPLOY_ENABLED == 'true' && vars.ECR_REPOSITORY == 'deliverygo-menus' && vars.EKS_CLUSTER != ''
     needs: ci
